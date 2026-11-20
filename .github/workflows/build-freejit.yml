@@ -8,7 +8,11 @@ on:
 
 jobs:
   build:
-    runs-on: macos-latest
+    # macos-15 is the image that actually ships Xcode 16.4. macos-latest
+    # now points at macOS 26 images whose oldest Xcode is 26.0.1 — the
+    # upstream FlekDeck build.yml pins 16.4 on macos-latest too and its CI
+    # has the same failure; pinning the runner is the fix.
+    runs-on: macos-15
     timeout-minutes: 60
 
     steps:
@@ -17,13 +21,21 @@ jobs:
         with:
           submodules: true
 
-      - name: Apply free-JIT patch (if not already committed)
+      - name: Apply free-JIT patch (fail if it does not apply)
         run: |
-          # If the patch is already part of your fork's history this is a no-op
-          # safety net: git apply fails loudly if it cannot apply.
-          git apply --check patches/free-jit.patch && git apply patches/free-jit.patch \
-            && echo "patch applied" \
-            || echo "patch already applied or not applicable — continuing"
+          # If the changes are already committed in your fork, there is
+          # nothing to do. If they are not, apply the patch. And if the patch
+          # no longer applies because upstream moved the code, FAIL here —
+          # a half-patched build would silently keep the Premium gate, which
+          # is worse than a red build.
+          if grep -q "FlekJIT needs Premium" LiveContainer/LCBootstrap.m 2>/dev/null \
+             || grep -q "try await ensurePremium()" LiveContainerSwiftUI/FlekDeck/Settings/FlekJITSetup.swift 2>/dev/null; then
+            git apply --check patches/free-jit.patch
+            git apply patches/free-jit.patch
+            echo "free-JIT patch applied"
+          else
+            echo "fork already carries the free-JIT changes — nothing to apply"
+          fi
 
       - name: Select Xcode
         uses: maxim-lobanov/setup-xcode@v1

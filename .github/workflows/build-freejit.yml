@@ -21,21 +21,251 @@ jobs:
         with:
           submodules: true
 
-      - name: Apply free-JIT patch (fail if it does not apply)
+      - name: Apply free-JIT patch (embedded, self-contained)
         run: |
-          # If the changes are already committed in your fork, there is
-          # nothing to do. If they are not, apply the patch. And if the patch
-          # no longer applies because upstream moved the code, FAIL here —
-          # a half-patched build would silently keep the Premium gate, which
-          # is worse than a red build.
-          if grep -q "FlekJIT needs Premium" LiveContainer/LCBootstrap.m 2>/dev/null \
-             || grep -q "try await ensurePremium()" LiveContainerSwiftUI/FlekDeck/Settings/FlekJITSetup.swift 2>/dev/null; then
-            git apply --check patches/free-jit.patch
-            git apply patches/free-jit.patch
-            echo "free-JIT patch applied"
-          else
-            echo "fork already carries the free-JIT changes — nothing to apply"
+          set -eu
+          # Self-contained: the patch is embedded below and written to /tmp at run
+          # time, so your fork does NOT need a patches/ directory. If your fork
+          # already carries the free-JIT changes in its source, nothing is applied.
+          # If the source is in an unrecognized state (upstream moved things), the
+          # step fails loudly instead of risking a half-patched build.
+          gate_files=(
+            LiveContainer/LCBootstrap.m
+            LiveContainerSwiftUI/FlekDeck/Settings/FlekJITSetup.swift
+            LiveContainerSwiftUI/FlekDeck/Settings/FlekBuiltInJITSection.swift
+          )
+          for f in "${gate_files[@]}"; do
+            test -f "$f" || { echo "FATAL: expected $f not found — upstream restructured the source; re-do the patch (kit README)"; exit 1; }
+          done
+          has() { grep -qF -- "$2" "$1"; }
+          gated=0; patched=0
+          if has LiveContainer/LCBootstrap.m 'FlekJIT needs Premium' \
+             || has LiveContainerSwiftUI/FlekDeck/Settings/FlekJITSetup.swift 'try await ensurePremium()' \
+             || has LiveContainerSwiftUI/FlekDeck/Settings/FlekBuiltInJITSection.swift 'isPremium = FlekPremium.isActive'; then
+            gated=1
           fi
+          if has LiveContainer/LCBootstrap.m 'Built-in JIT is a Premium feature upstream'; then
+            patched=1
+          fi
+          if [ "$gated" = 1 ] && [ "$patched" = 1 ]; then
+            echo "FATAL: mixed state — some Premium gates remain while fork patch markers are present; sort the source out and re-run"; exit 1
+          fi
+          if [ "$gated" = 1 ]; then
+            cat > /tmp/free-jit.patch <<'FREE_JIT_PATCH_EOF'
+          diff --git a/LiveContainer/LCBootstrap.m b/LiveContainer/LCBootstrap.m
+          index 78ab71d..ff65889 100644
+          --- a/LiveContainer/LCBootstrap.m
+          +++ b/LiveContainer/LCBootstrap.m
+          @@ -251,22 +251,8 @@ static void LCWatchForJITHelperDone(void) {
+           }
+           
+           static NSString *enableJITWithStikJIT(NSString *docPath) {
+          -    // Built-in JIT is a Premium feature: the app says how long Premium lasts,
+          -    // or that it has just confirmed it for this launch. The app asks the same
+          -    // before a launch from the home screen, but not every launch starts
+          -    // there — a link opened in another guest leads straight here. Ahead of
+          -    // everything else, so that a launch that is refused sets nothing up and
+          -    // is told why, whatever else it lacks.
+          -    {
+          -        NSUserDefaults *shared = NSUserDefaults.lcSharedDefaults;
+          -        NSTimeInterval clock = NSDate.date.timeIntervalSince1970;
+          -        // The latest the clock has been seen at stands in for one wound back.
+          -        NSTimeInterval now = MAX(clock, [shared doubleForKey:@"FSAccessClockHighWaterMark"]);
+          -        BOOL justConfirmed = fabs(clock - [shared doubleForKey:@"FlekPremiumConfirmedAt"]) < 60;
+          -        if (!justConfirmed && [shared doubleForKey:@"FlekPremiumUntil"] <= now) {
+          -            return @"FlekJIT needs Premium. Open FlekDeck to renew Premium, or choose StikDebug in Settings › JIT, which is free.";
+          -        }
+          -    }
+          +    // Built-in JIT is a Premium feature upstream; this fork build removes the
+          +    // subscription gate so the built-in enabler works without Premium.
+           
+               __block NSError *error;
+               NSExtension *ext = [NSExtension extensionWithIdentifier:LCSharedUtils.liveProcessBundleIdentifier error:&error];
+          diff --git a/LiveContainerSwiftUI/FlekDeck/Settings/FlekBuiltInJITSection.swift b/LiveContainerSwiftUI/FlekDeck/Settings/FlekBuiltInJITSection.swift
+          index 9925c1f..37aae13 100644
+          --- a/LiveContainerSwiftUI/FlekDeck/Settings/FlekBuiltInJITSection.swift
+          +++ b/LiveContainerSwiftUI/FlekDeck/Settings/FlekBuiltInJITSection.swift
+          @@ -52,8 +52,9 @@ struct FlekBuiltInJITSection: View {
+               /// this reads a file.
+               @State private var pairingMadeOnDevice = false
+               /// By what is kept, from the start, so that the steps are not preceded by
+          -    /// a glimpse of the offer.
+          -    @State private var isPremium = FlekPremium.isActive
+          +    /// a glimpse of the offer. Always true in this fork build: built-in JIT
+          +    /// is free here.
+          +    @State private var isPremium = true
+               /// While the server is asked about Premium.
+               @State private var isCheckingPremium = false
+               @State private var showsPremiumSheet = false
+          @@ -146,7 +147,7 @@ struct FlekBuiltInJITSection: View {
+                           // be applied to every row, and so run once per row.
+                           .onAppear {
+                               pairingMadeOnDevice = FlekBuiltInJIT.isPairingFileMadeOnDevice
+          -                    isPremium = FlekPremium.isActive
+          +                    isPremium = true
+                               if readiness == .unchecked, readyAt > 0, pairingFileFound {
+                                   readiness = .ready
+                               }
+          @@ -304,28 +305,12 @@ struct FlekBuiltInJITSection: View {
+                   .padding(.vertical, 2)
+               }
+           
+          -    /// Runs `proceed` once Premium is settled, with the server where nothing
+          -    /// kept says yes: it may have been got a moment ago. Without Premium the
+          -    /// offer takes the steps' place, and says how to get it.
+          +    /// Runs `proceed` once Premium is settled — which in this fork build it
+          +    /// always is: built-in JIT is free here, so no confirmation is asked for
+          +    /// and nothing takes the steps' place.
+               private func withPremium(_ proceed: @escaping () -> Void) {
+          -        guard !isCheckingPremium else {
+          -            return
+          -        }
+          -        isCheckingPremium = true
+          -        Task {
+          -            let answer = await FlekPremium.confirm()
+          -            isCheckingPremium = false
+          -            switch answer {
+          -            case .active:
+          -                isPremium = true
+          -                proceed()
+          -            case .inactive:
+          -                isPremium = false
+          -                showsPremiumSheet = true
+          -            case .unconfirmed:
+          -                show("lc.flek.jit.premium.unconfirmed".loc)
+          -            }
+          -        }
+          +        isPremium = true
+          +        proceed()
+               }
+           
+               // MARK: 1. Pairing file
+          @@ -493,16 +478,10 @@ struct FlekBuiltInJITSection: View {
+                   }
+               }
+           
+          -    /// What is kept about Premium, and the server's word where that says no,
+          -    /// unless nothing here could be used with it either.
+          +    /// What is kept about Premium — always active in this fork build, where
+          +    /// built-in JIT is free, so the server is never asked from here.
+               private func refreshPremium() async {
+          -        isPremium = FlekPremium.isActive
+          -        guard !isPremium, FlekBuiltInJIT.blocker == nil else {
+          -            return
+          -        }
+          -        if await FlekPremium.refresh() == true {
+          -            isPremium = true
+          -        }
+          +        isPremium = true
+               }
+           
+               /// A pairing file is a property list whatever it is called; iloader and
+          diff --git a/LiveContainerSwiftUI/FlekDeck/Settings/FlekJITSetup.swift b/LiveContainerSwiftUI/FlekDeck/Settings/FlekJITSetup.swift
+          index ea48707..8e842c3 100644
+          --- a/LiveContainerSwiftUI/FlekDeck/Settings/FlekJITSetup.swift
+          +++ b/LiveContainerSwiftUI/FlekDeck/Settings/FlekJITSetup.swift
+          @@ -277,9 +277,8 @@ enum FlekJITSetup {
+                   }
+                   // Only of a setup there is: one never started is still the invitation
+                   // to start, and what that takes is said where it is started.
+          -        if !FlekPremium.isActive {
+          -            return .needsPremium
+          -        }
+          +        // (Upstream returns .needsPremium without Premium; this fork build
+          +        // treats built-in JIT as free.)
+                   let steps = [
+                       hasFile,
+                       // Another app's VPN where FlekDeck has none, and not to be seen.
+          @@ -323,8 +322,10 @@ enum FlekJITSetup {
+                   if let blocker = FlekBuiltInJIT.blocker {
+                       throw NotReady(message: blocker)
+                   }
+          -        // Ahead of the setup: without Premium there is none to send anyone to.
+          -        try await ensurePremium()
+          +        // Premium gate removed in this fork build: built-in JIT is free here.
+          +        // Still publish the (empty) state so a guest starting on its own has
+          +        // whatever the app group holds, as upstream does.
+          +        FlekPremium.publish()
+                   // Another FlekDeck uses the primary one's pairing file, which it
+                   // cannot see.
+                   if DataManager.shared.model.multiLCStatus == 0, !FlekBuiltInJIT.hasPairingFile {
+          @@ -378,20 +379,7 @@ enum FlekJITSetup {
+                   NotReady(message: key.loc, messageWhileWaiting: "\(key).waiting".loc)
+               }
+           
+          -    /// Built-in JIT is used with Premium only, at every launch and not just
+          -    /// while it is being set up: Premium bought for a day would otherwise set
+          -    /// up JIT for good.
+          -    @MainActor
+          -    private static func ensurePremium() async throws {
+          -        // What a guest goes by where it starts without this having been asked.
+          -        FlekPremium.publish()
+          -        switch await FlekPremium.confirm() {
+          -        case .active:
+          -            FlekPremium.noteConfirmedForLaunch()
+          -        case .inactive:
+          -            throw NotReady(title: "lc.flek.jit.premium.title".loc, message: "lc.flek.jit.premium.needed".loc)
+          -        case .unconfirmed:
+          -            throw NotReady(title: "lc.flek.jit.premium.title".loc, message: "lc.flek.jit.premium.unconfirmed".loc)
+          -        }
+          -    }
+          +    // ensurePremium() was removed by the free-JIT fork patch: the built-in
+          +    // enabler no longer requires Premium in this build. The enum case
+          +    // Standing.needsPremium is kept so FlekGeneralView still compiles.
+           }
+          FREE_JIT_PATCH_EOF
+            git apply --check /tmp/free-jit.patch \
+              || { echo "FATAL: free-jit patch no longer applies — upstream moved the code; re-generate it (kit README, Upgrading section)"; exit 1; }
+            git apply /tmp/free-jit.patch
+            echo "free-JIT patch applied"
+          elif [ "$patched" = 1 ]; then
+            echo "fork already carries the free-JIT changes — nothing to apply"
+          else
+            echo "FATAL: neither upstream Premium gates nor fork patch markers found — unrecognized source; re-do the patch (kit README)"; exit 1
+          fi
+      - name: Pin Kingfisher 8.12.0 (Xcode 16.4 / Swift 6.1 tools compatible)
+        run: |
+          set -eu
+          # Why: FlekDeck's checked-in Package.resolved pins Kingfisher 8.14.0,
+          # whose Package.swift declares swift-tools-version 6.2 — a manifest
+          # only Xcode 26's tools can parse. This workflow deliberately builds
+          # with Xcode 16.4 (Swift 6.1 tools) on macos-15, so package
+          # resolution dies with:
+          #   package 'kingfisher' @ 8.14.0 is using Swift tools version 6.2.0
+          #   but the installed version is 6.1.0
+          # 8.12.0 is the last Kingfisher whose manifest still declares tools
+          # 5.1, it satisfies the project's upToNextMajor(8.6.2) requirement,
+          # and the API surface FlekDeck uses (KFImage / ImageCache /
+          # KingfisherManager) is stable across 8.x. xcodebuild honors the
+          # checked-in Package.resolved (your failing run resolved exactly
+          # 8.14.0, the pinned revision, not the newer 8.16.0), so rewriting
+          # the pin makes it fetch 8.12.0 instead.
+          RESOLVED="LiveContainer.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
+          test -f "$RESOLVED" || {
+            echo "FATAL: $RESOLVED not found — upstream restructured; this pin step needs a re-check"
+            exit 1
+          }
+          python3 - "$RESOLVED" <<'PIN_KINGFISHER_EOF'
+          import json, sys
+          path = sys.argv[1]
+          with open(path) as f:
+              resolved = json.load(f)
+          pin = next((p for p in resolved.get("pins", []) if "Kingfisher" in p.get("location", "")), None)
+          if pin is None:
+              print("FATAL: Kingfisher no longer in Package.resolved — upstream dependency set changed; this pin step needs a re-check")
+              sys.exit(1)
+          pin["state"] = {
+              "revision": "be0d257b9bd47a4e6e1265fc8c237411825f107a",
+              "version": "8.12.0",
+          }
+          with open(path, "w") as f:
+              json.dump(resolved, f, indent=2)
+              f.write("\n")
+          print("Package.resolved: Kingfisher pinned to 8.12.0 (swift-tools-version 5.1 — parses fine with Swift 6.1 tools)")
+          PIN_KINGFISHER_EOF
+          # Belt and suspenders: fail here, not 20 minutes later inside
+          # xcodebuild, if the rewrite did not take.
+          python3 -c "import json,sys; r=json.load(open(sys.argv[1])); s=[p for p in r['pins'] if 'Kingfisher' in p['location']][0]['state']; assert s['version']=='8.12.0' and s['revision']=='be0d257b9bd47a4e6e1265fc8c237411825f107a', s" "$RESOLVED"
 
       - name: Select Xcode
         uses: maxim-lobanov/setup-xcode@v1

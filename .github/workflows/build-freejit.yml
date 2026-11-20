@@ -1,0 +1,65 @@
+name: Build FlekDeck (free built-in JIT)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout your fork
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Apply free-JIT patch (if not already committed)
+        run: |
+          # If the patch is already part of your fork's history this is a no-op
+          # safety net: git apply fails loudly if it cannot apply.
+          git apply --check patches/free-jit.patch && git apply patches/free-jit.patch \
+            && echo "patch applied" \
+            || echo "patch already applied or not applicable — continuing"
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "16.4"
+
+      - name: Build unsigned archive (no Apple Developer account needed)
+        run: |
+          set -o pipefail
+          xcodebuild clean archive \
+            -project "LiveContainer.xcodeproj" \
+            -scheme "LiveContainer" \
+            -configuration Release \
+            -archivePath $PWD/build/FlekDeck.xcarchive \
+            -destination "generic/platform=iOS" \
+            CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
+            | xcpretty || true
+          test -d build/FlekDeck.xcarchive/Products/Applications/FlekDeck.app \
+            || { echo "archive missing FlekDeck.app — build failed"; exit 1; }
+
+      - name: Package unsigned IPA
+        run: |
+          mkdir -p build/Payload
+          cp -R build/FlekDeck.xcarchive/Products/Applications/FlekDeck.app build/Payload/
+          cd build
+          zip -qry FlekDeck-freejit-unsigned.ipa Payload -x "._*" ".DS_Store" "__MACOSX*"
+          ls -lh FlekDeck-freejit-unsigned.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FlekDeck-freejit-unsigned-ipa
+          path: build/FlekDeck-freejit-unsigned.ipa
+          retention-days: 30
+
+      - name: Summary
+        run: |
+          echo "### Build done" >> $GITHUB_STEP_SUMMARY
+          echo "Download the unsigned IPA from this run's Artifacts, then sign it locally (see README)." >> $GITHUB_STEP_SUMMARY

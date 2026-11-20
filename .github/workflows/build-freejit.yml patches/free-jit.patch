@@ -1,0 +1,161 @@
+diff --git a/LiveContainer/LCBootstrap.m b/LiveContainer/LCBootstrap.m
+index 78ab71d..ff65889 100644
+--- a/LiveContainer/LCBootstrap.m
++++ b/LiveContainer/LCBootstrap.m
+@@ -251,22 +251,8 @@ static void LCWatchForJITHelperDone(void) {
+ }
+ 
+ static NSString *enableJITWithStikJIT(NSString *docPath) {
+-    // Built-in JIT is a Premium feature: the app says how long Premium lasts,
+-    // or that it has just confirmed it for this launch. The app asks the same
+-    // before a launch from the home screen, but not every launch starts
+-    // there â€” a link opened in another guest leads straight here. Ahead of
+-    // everything else, so that a launch that is refused sets nothing up and
+-    // is told why, whatever else it lacks.
+-    {
+-        NSUserDefaults *shared = NSUserDefaults.lcSharedDefaults;
+-        NSTimeInterval clock = NSDate.date.timeIntervalSince1970;
+-        // The latest the clock has been seen at stands in for one wound back.
+-        NSTimeInterval now = MAX(clock, [shared doubleForKey:@"FSAccessClockHighWaterMark"]);
+-        BOOL justConfirmed = fabs(clock - [shared doubleForKey:@"FlekPremiumConfirmedAt"]) < 60;
+-        if (!justConfirmed && [shared doubleForKey:@"FlekPremiumUntil"] <= now) {
+-            return @"FlekJIT needs Premium. Open FlekDeck to renew Premium, or choose StikDebug in Settings â€º JIT, which is free.";
+-        }
+-    }
++    // Built-in JIT is a Premium feature upstream; this fork build removes the
++    // subscription gate so the built-in enabler works without Premium.
+ 
+     __block NSError *error;
+     NSExtension *ext = [NSExtension extensionWithIdentifier:LCSharedUtils.liveProcessBundleIdentifier error:&error];
+diff --git a/LiveContainerSwiftUI/FlekDeck/Settings/FlekBuiltInJITSection.swift b/LiveContainerSwiftUI/FlekDeck/Settings/FlekBuiltInJITSection.swift
+index 9925c1f..37aae13 100644
+--- a/LiveContainerSwiftUI/FlekDeck/Settings/FlekBuiltInJITSection.swift
++++ b/LiveContainerSwiftUI/FlekDeck/Settings/FlekBuiltInJITSection.swift
+@@ -52,8 +52,9 @@ struct FlekBuiltInJITSection: View {
+     /// this reads a file.
+     @State private var pairingMadeOnDevice = false
+     /// By what is kept, from the start, so that the steps are not preceded by
+-    /// a glimpse of the offer.
+-    @State private var isPremium = FlekPremium.isActive
++    /// a glimpse of the offer. Always true in this fork build: built-in JIT
++    /// is free here.
++    @State private var isPremium = true
+     /// While the server is asked about Premium.
+     @State private var isCheckingPremium = false
+     @State private var showsPremiumSheet = false
+@@ -146,7 +147,7 @@ struct FlekBuiltInJITSection: View {
+                 // be applied to every row, and so run once per row.
+                 .onAppear {
+                     pairingMadeOnDevice = FlekBuiltInJIT.isPairingFileMadeOnDevice
+-                    isPremium = FlekPremium.isActive
++                    isPremium = true
+                     if readiness == .unchecked, readyAt > 0, pairingFileFound {
+                         readiness = .ready
+                     }
+@@ -304,28 +305,12 @@ struct FlekBuiltInJITSection: View {
+         .padding(.vertical, 2)
+     }
+ 
+-    /// Runs `proceed` once Premium is settled, with the server where nothing
+-    /// kept says yes: it may have been got a moment ago. Without Premium the
+-    /// offer takes the steps' place, and says how to get it.
++    /// Runs `proceed` once Premium is settled â€” which in this fork build it
++    /// always is: built-in JIT is free here, so no confirmation is asked for
++    /// and nothing takes the steps' place.
+     private func withPremium(_ proceed: @escaping () -> Void) {
+-        guard !isCheckingPremium else {
+-            return
+-        }
+-        isCheckingPremium = true
+-        Task {
+-            let answer = await FlekPremium.confirm()
+-            isCheckingPremium = false
+-            switch answer {
+-            case .active:
+-                isPremium = true
+-                proceed()
+-            case .inactive:
+-                isPremium = false
+-                showsPremiumSheet = true
+-            case .unconfirmed:
+-                show("lc.flek.jit.premium.unconfirmed".loc)
+-            }
+-        }
++        isPremium = true
++        proceed()
+     }
+ 
+     // MARK: 1. Pairing file
+@@ -493,16 +478,10 @@ struct FlekBuiltInJITSection: View {
+         }
+     }
+ 
+-    /// What is kept about Premium, and the server's word where that says no,
+-    /// unless nothing here could be used with it either.
++    /// What is kept about Premium â€” always active in this fork build, where
++    /// built-in JIT is free, so the server is never asked from here.
+     private func refreshPremium() async {
+-        isPremium = FlekPremium.isActive
+-        guard !isPremium, FlekBuiltInJIT.blocker == nil else {
+-            return
+-        }
+-        if await FlekPremium.refresh() == true {
+-            isPremium = true
+-        }
++        isPremium = true
+     }
+ 
+     /// A pairing file is a property list whatever it is called; iloader and
+diff --git a/LiveContainerSwiftUI/FlekDeck/Settings/FlekJITSetup.swift b/LiveContainerSwiftUI/FlekDeck/Settings/FlekJITSetup.swift
+index ea48707..8e842c3 100644
+--- a/LiveContainerSwiftUI/FlekDeck/Settings/FlekJITSetup.swift
++++ b/LiveContainerSwiftUI/FlekDeck/Settings/FlekJITSetup.swift
+@@ -277,9 +277,8 @@ enum FlekJITSetup {
+         }
+         // Only of a setup there is: one never started is still the invitation
+         // to start, and what that takes is said where it is started.
+-        if !FlekPremium.isActive {
+-            return .needsPremium
+-        }
++        // (Upstream returns .needsPremium without Premium; this fork build
++        // treats built-in JIT as free.)
+         let steps = [
+             hasFile,
+             // Another app's VPN where FlekDeck has none, and not to be seen.
+@@ -323,8 +322,10 @@ enum FlekJITSetup {
+         if let blocker = FlekBuiltInJIT.blocker {
+             throw NotReady(message: blocker)
+         }
+-        // Ahead of the setup: without Premium there is none to send anyone to.
+-        try await ensurePremium()
++        // Premium gate removed in this fork build: built-in JIT is free here.
++        // Still publish the (empty) state so a guest starting on its own has
++        // whatever the app group holds, as upstream does.
++        FlekPremium.publish()
+         // Another FlekDeck uses the primary one's pairing file, which it
+         // cannot see.
+         if DataManager.shared.model.multiLCStatus == 0, !FlekBuiltInJIT.hasPairingFile {
+@@ -378,20 +379,7 @@ enum FlekJITSetup {
+         NotReady(message: key.loc, messageWhileWaiting: "\(key).waiting".loc)
+     }
+ 
+-    /// Built-in JIT is used with Premium only, at every launch and not just
+-    /// while it is being set up: Premium bought for a day would otherwise set
+-    /// up JIT for good.
+-    @MainActor
+-    private static func ensurePremium() async throws {
+-        // What a guest goes by where it starts without this having been asked.
+-        FlekPremium.publish()
+-        switch await FlekPremium.confirm() {
+-        case .active:
+-            FlekPremium.noteConfirmedForLaunch()
+-        case .inactive:
+-            throw NotReady(title: "lc.flek.jit.premium.title".loc, message: "lc.flek.jit.premium.needed".loc)
+-        case .unconfirmed:
+-            throw NotReady(title: "lc.flek.jit.premium.title".loc, message: "lc.flek.jit.premium.unconfirmed".loc)
+-        }
+-    }
++    // ensurePremium() was removed by the free-JIT fork patch: the built-in
++    // enabler no longer requires Premium in this build. The enum case
++    // Standing.needsPremium is kept so FlekGeneralView still compiles.
+ }

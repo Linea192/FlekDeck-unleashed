@@ -1,4 +1,4 @@
-)
+name: Build FlekDeck (free built-in JIT)
 
 on:
   workflow_dispatch:

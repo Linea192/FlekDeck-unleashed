@@ -473,6 +473,125 @@ jobs:
             git apply /tmp/sidestore-cert.patch
             echo "sidestore-cert patch applied"
           fi
+      - name: Apply app-group entitlements patch (embedded, self-contained)
+        run: |
+          set -eu
+          # The entitlements files must ask for app groups the runtime can actually
+          # reach after the signing store re-signs the app. The stock files ask for
+          # groups that only work for the original upstream team's own signing,
+          # LiveProcess Release asks for none, and the Share/Launch extensions ask
+          # for none either — every extension shares the group the app writes into
+          # (the guest launcher reads the certificate through it; the widget reads
+          # its data the same way). The patch swaps them all to the build variables
+          # that expand to the bare store groups (Release has no team suffix), which
+          # SideStore/AltStore append their team to at install time — the same
+          # group.com.SideStore.SideStore.<team> that LCSharedUtils probes.
+          gate_files=(
+            entitlements.xml
+            LiveProcess/LiveProcess.entitlements
+            LiveProcess/LiveProcessRelease.entitlements
+            WidgetExtension/WidgetExtension.entitlements
+            ShareExtension/ShareExtension.entitlements
+            LaunchAppExtension/LaunchAppExtension.entitlements
+          )
+          for f in "${gate_files[@]}"; do
+            test -f "$f" || { echo "FATAL: expected $f not found — upstream restructured the source; re-do the patch (kit README)"; exit 1; }
+          done
+          has() { grep -qF -- "$2" "$1"; }
+          hardcoded=0; variables=0
+          if has entitlements.xml 'group.com.SideStore.SideStore.2V7F92VA47'; then
+            hardcoded=1
+          fi
+          if has entitlements.xml 'APP_GROUP_SIDESTORE' \
+             && has LiveProcess/LiveProcessRelease.entitlements 'APP_GROUP_SIDESTORE' \
+             && has WidgetExtension/WidgetExtension.entitlements 'APP_GROUP_SIDESTORE' \
+             && has ShareExtension/ShareExtension.entitlements 'APP_GROUP_SIDESTORE' \
+             && has LaunchAppExtension/LaunchAppExtension.entitlements 'APP_GROUP_SIDESTORE'; then
+            variables=1
+          fi
+          if [ "$variables" = 1 ]; then
+            echo "fork already carries the app-group entitlements fix — nothing to apply"
+          elif [ "$hardcoded" = 1 ]; then
+            cat > /tmp/appgroup-entitlements.patch <<'APPGROUP_PATCH_EOF'
+          diff --git a/LiveProcess/LiveProcessRelease.entitlements b/LiveProcess/LiveProcessRelease.entitlements
+          --- a/LiveProcess/LiveProcessRelease.entitlements
+          +++ b/LiveProcess/LiveProcessRelease.entitlements
+          @@ -13,7 +13,10 @@
+           	<key>com.apple.developer.kernel.increased-memory-limit</key>
+           	<true/>
+           	<key>com.apple.security.application-groups</key>
+          -	<array/>
+          +	<array>
+          +		<string>$(APP_GROUP_SIDESTORE)</string>
+          +		<string>$(APP_GROUP_ALTSTORE)</string>
+          +	</array>
+           	<key>get-task-allow</key>
+           	<true/>
+           	<key>keychain-access-groups</key>
+          diff --git a/WidgetExtension/WidgetExtension.entitlements b/WidgetExtension/WidgetExtension.entitlements
+          --- a/WidgetExtension/WidgetExtension.entitlements
+          +++ b/WidgetExtension/WidgetExtension.entitlements
+          @@ -4,8 +4,8 @@
+           <dict>
+           	<key>com.apple.security.application-groups</key>
+           	<array>
+          -		<string>group.com.SideStore.SideStore.2V7F92VA47</string>
+          -		<string>group.com.rileytestut.AltStore.2V7F92VA47</string>
+          +		<string>$(APP_GROUP_SIDESTORE)</string>
+          +		<string>$(APP_GROUP_ALTSTORE)</string>
+           	</array>
+           </dict>
+           </plist>
+          diff --git a/ShareExtension/ShareExtension.entitlements b/ShareExtension/ShareExtension.entitlements
+          --- a/ShareExtension/ShareExtension.entitlements
+          +++ b/ShareExtension/ShareExtension.entitlements
+          @@ -3,6 +3,9 @@
+           <plist version="1.0">
+           <dict>
+           	<key>com.apple.security.application-groups</key>
+          -	<array/>
+          +	<array>
+          +		<string>$(APP_GROUP_SIDESTORE)</string>
+          +		<string>$(APP_GROUP_ALTSTORE)</string>
+          +	</array>
+           </dict>
+           </plist>
+          diff --git a/LaunchAppExtension/LaunchAppExtension.entitlements b/LaunchAppExtension/LaunchAppExtension.entitlements
+          --- a/LaunchAppExtension/LaunchAppExtension.entitlements
+          +++ b/LaunchAppExtension/LaunchAppExtension.entitlements
+          @@ -3,6 +3,9 @@
+           <plist version="1.0">
+           <dict>
+           	<key>com.apple.security.application-groups</key>
+          -	<array/>
+          +	<array>
+          +		<string>$(APP_GROUP_SIDESTORE)</string>
+          +		<string>$(APP_GROUP_ALTSTORE)</string>
+          +	</array>
+           </dict>
+           </plist>
+          diff --git a/entitlements.xml b/entitlements.xml
+          --- a/entitlements.xml
+          +++ b/entitlements.xml
+          @@ -22,8 +22,8 @@
+           	<string>$(DEVELOPMENT_TEAM)</string>
+           	<key>com.apple.security.application-groups</key>
+           	<array>
+          -		<string>group.com.SideStore.SideStore.2V7F92VA47</string>
+          -		<string>group.com.rileytestut.AltStore.2V7F92VA47</string>
+          +		<string>$(APP_GROUP_SIDESTORE)</string>
+          +		<string>$(APP_GROUP_ALTSTORE)</string>
+           	</array>
+           	<key>get-task-allow</key>
+           	<true/>
+          APPGROUP_PATCH_EOF
+            git apply --check /tmp/appgroup-entitlements.patch \
+              || { echo "FATAL: app-group patch no longer applies — upstream moved the files; re-generate it (kit README, Upgrading section)"; exit 1; }
+            git apply /tmp/appgroup-entitlements.patch
+            echo "app-group entitlements patch applied"
+          else
+            echo "FATAL: entitlements in an unrecognized state (no hardcoded upstream-team groups, no variables) — re-do the patch (kit README)"; exit 1
+          fi
       - name: Select Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
@@ -488,7 +607,7 @@ jobs:
           # 27.1 (27A9275) is also this image's default Xcode.
           xcode-version: "27.1"
 
-      - name: Build unsigned archive (no Apple Developer account needed)
+      - name: Build ad-hoc-signed archive (no Apple Developer account needed)
         run: |
           set -o pipefail
           # Log to a file so failures can be tailed in full below: xcodebuild's
@@ -496,6 +615,18 @@ jobs:
           # GitHub runs this with bash -e, so the exit code is captured with
           # `|| status=$?` — a bare failing command would abort before the
           # tail code below could run.
+          #
+          # Signing is AD-HOC (identity "-"), not disabled. A build with
+          # CODE_SIGNING_ALLOWED=NO produces a binary with no entitlements
+          # at all; a sideload store reads entitlements from the IPA's code
+          # signature, finds none, and provisions no app groups — so the
+          # app-group defaults suites resolve to "Unknown" in every process
+          # and the UI and the guest launcher end up writing/reading
+          # different private domains (the certificate import "works" in
+          # Settings but the launch gate never sees it). Ad-hoc signing
+          # embeds the entitlements from the patched .entitlements files;
+          # the store re-signs over them with its own profile, keeping the
+          # app groups the runtime probes.
           status=0
           xcodebuild clean archive \
             -project "LiveContainer.xcodeproj" \
@@ -503,7 +634,7 @@ jobs:
             -configuration Release \
             -archivePath $PWD/build/FlekDeck.xcarchive \
             -destination "generic/platform=iOS" \
-            CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO AD_HOC_CODE_SIGNING_ALLOWED=YES \
             > build.log 2>&1 || status=$?
           # Pretty-print the log tail for the web UI (xcbeautify ships on the
           # xcode-27 image; fall back through xcpretty to a plain cat).
@@ -522,31 +653,124 @@ jobs:
           test -d build/FlekDeck.xcarchive/Products/Applications/FlekDeck.app \
             || { echo "archive missing FlekDeck.app — build failed"; exit 1; }
 
-      - name: Package unsigned IPA
+      - name: Sign IPA entitlements in a store-readable form (ldid)
+        run: |
+          set -eu
+          # The sideload store reads an app's entitlements from the code
+          # signature of the IPA (XML plist in the entitlements slot) to decide
+          # which entitlements — including app groups — to provision with your
+          # Apple ID. What xcodebuild's own ad-hoc pass leaves in that slot is
+          # not reliably the form the store parses: an entitlements blob the
+          # store cannot decode reads as "the app asks for nothing", the store
+          # then re-signs with no application-groups at all, and every
+          # app-group defaults suite resolves to "Unknown" — the certificate
+          # import appears to work, but the guest-launch gate never sees it.
+          # This pass re-signs every entitlement-bearing binary with ldid,
+          # which writes exactly the XML plist the store parses. The store
+          # re-signs over these at install; what matters is that it can READ
+          # them, and that they ask for the groups its runtime probes.
+          brew install ldid
+          cd build/FlekDeck.xcarchive/Products/Applications
+          APP=FlekDeck.app
+          # The store groups as a plain XML plist: SideStore/AltStore append
+          # your Apple ID's team suffix at install time, producing exactly the
+          # group.com.SideStore.SideStore.<team> the runtime probes.
+          cat > /tmp/groups.plist <<'GROUPS_PLIST_EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+          	<key>com.apple.security.application-groups</key>
+          	<array>
+          		<string>group.com.SideStore.SideStore</string>
+          		<string>group.com.rileytestut.AltStore</string>
+          	</array>
+          </dict>
+          </plist>
+          GROUPS_PLIST_EOF
+          # The app binary and every appex that shares the group: LiveProcess
+          # (guest launcher), WidgetExtension, ShareExtension,
+          # LaunchAppExtension. LoopbackVPN asks for a network-extension
+          # entitlement a free Apple ID cannot be granted, so it keeps its own
+          # entitlements — the store drops that key when signing and the
+          # built-in VPN falls back to LocalDevVPN, as designed.
+          ldid -S/tmp/groups.plist "$APP/FlekDeck"
+          for appex in LiveProcess WidgetExtension ShareExtension LaunchAppExtension; do
+            BIN="$APP/PlugIns/$appex.appex/$appex"
+            test -f "$BIN" || { echo "FATAL: $BIN missing — extension layout changed; update the sign step"; exit 1; }
+            ldid -S/tmp/groups.plist "$BIN"
+          done
+          cat > /tmp/vpn.plist <<'VPN_PLIST_EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+          	<key>com.apple.developer.networking.networkextension</key>
+          	<array>
+          		<string>packet-tunnel-provider</string>
+          	</array>
+          </dict>
+          </plist>
+          VPN_PLIST_EOF
+          VPN_BIN="$APP/PlugIns/LoopbackVPN.appex/LoopbackVPN"
+          test -f "$VPN_BIN" || { echo "FATAL: $VPN_BIN missing — extension layout changed; update the sign step"; exit 1; }
+          ldid -S/tmp/vpn.plist "$VPN_BIN"
+          # Frameworks and dylibs carry no entitlements of their own; ldid
+          # signs them ad-hoc so the store accepts the bundle. -perm -111 is
+          # the portable "any execute bit" form (GNU and BSD find agree).
+          find "$APP" -name '*.framework' -type d | while read -r fw; do
+            BIN=$(find "$fw" -type f -perm -111 2>/dev/null | head -1)
+            test -z "$BIN" || ldid -S "$BIN"
+          done || true
+          for dy in $(find "$APP" -name '*.dylib' -type f); do
+            ldid -S "$dy"
+          done
+          # Self-verification: decode the entitlements slot ourselves and
+          # require the groups to be present as literal XML, so a silent
+          # regression in the sign step fails the build instead of shipping
+          # an IPA the store reads as "asks for nothing".
+          check() {
+            BIN="$1"
+            OUT=$(ldid -e "$BIN" 2>/dev/null || true)
+            if ! printf '%s' "$OUT" | grep -q 'com.apple.security.application-groups'; then
+              echo "FATAL: $BIN entitlements slot carries no application-groups"; exit 1
+            fi
+            printf '%s' "$OUT" | grep -q 'group.com.SideStore.SideStore' \
+              || { echo "FATAL: $BIN entitlements miss the SideStore group"; exit 1; }
+          }
+          check "$APP/FlekDeck"
+          for appex in LiveProcess WidgetExtension ShareExtension LaunchAppExtension; do
+            check "$APP/PlugIns/$appex.appex/$appex"
+          done
+          echo "--- app entitlements as signed (ldid) ---"
+          ldid -e "$APP/FlekDeck"
+          echo "--- verification passed: all group-bearing binaries ask for the store groups ---"
+
+      - name: Package IPA (ldid-signed, store re-signs it on install)
         run: |
           mkdir -p build/Payload
           cp -R build/FlekDeck.xcarchive/Products/Applications/FlekDeck.app build/Payload/
           # Stamp the kit revision into the app version so a build can be told
           # apart from an older one at a glance: iOS Settings > FlekDeck (or any
-          # About line) shows 0.3.0+cert2 only on a build carrying the v2
-          # certificate-callback fix. The same stamp is echoed into the run log
-          # and the artifact name, so the IPA file itself carries it too.
-          BUILD_STAMP="+cert2"
+          # About line) shows 0.3.0+cert4 only on a build carrying the v4
+          # store-readable entitlements fix. The same stamp is echoed into the
+          # run log, so the run log says which revision a build is.
+          BUILD_STAMP="+cert4"
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' build/Payload/FlekDeck.app/Info.plist)$BUILD_STAMP" build/Payload/FlekDeck.app/Info.plist
-          echo "built with sidestore-cert patch v2 (storeCertificateFromLink in LCTabView) — version stamp $BUILD_STAMP"
+          echo "built with kit revision v4: certificate callback + app-group entitlements + store-readable ldid signing — version stamp $BUILD_STAMP"
           cd build
-          zip -qry FlekDeck-freejit-unsigned.ipa Payload -x "._*" ".DS_Store" "__MACOSX*"
-          ls -lh FlekDeck-freejit-unsigned.ipa
+          zip -qry FlekDeck-freejit-ldid.ipa Payload -x "._*" ".DS_Store" "__MACOSX*"
+          ls -lh FlekDeck-freejit-ldid.ipa
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FlekDeck-freejit-unsigned-ipa
-          path: build/FlekDeck-freejit-unsigned.ipa
+          name: FlekDeck-freejit-ldid-ipa
+          path: build/FlekDeck-freejit-ldid.ipa
           retention-days: 30
 
       - name: Summary
         run: |
           echo "### Build done" >> $GITHUB_STEP_SUMMARY
-          echo "This build carries the **v2** SideStore-certificate fix (version stamp: 0.3.0+cert2). If your installed FlekDeck does not show that stamp in iOS Settings, it is the old build — reinstall from this artifact." >> $GITHUB_STEP_SUMMARY
-          echo "Download the unsigned IPA from this run's Artifacts, then sign it locally (see README)." >> $GITHUB_STEP_SUMMARY
+          echo "This build is kit revision **v4** (version stamp: 0.3.0+cert4): certificate callback fix + app-group entitlements for the app AND every extension + ldid signing in the XML form the store parses. On anything older the certificate import cannot stick — reinstall from this artifact." >> $GITHUB_STEP_SUMMARY
+          echo "Install this IPA through SideStore/AltStore (it re-signs it with your account and provisions the app groups). Delete the old FlekDeck install first if the diagnostics page shows App Group ID: Unknown." >> $GITHUB_STEP_SUMMARY

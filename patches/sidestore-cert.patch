@@ -84,6 +84,63 @@ index 2f176d1..818762f 100644
      private func certificateOption<Tray: View>(
          isDimmed: Bool = false,
          showsChevron: Bool = false,
+diff --git a/LiveContainerSwiftUI/Views/LCTabView.swift b/LiveContainerSwiftUI/Views/LCTabView.swift
+index 014e813..b7884a6 100644
+--- a/LiveContainerSwiftUI/Views/LCTabView.swift
++++ b/LiveContainerSwiftUI/Views/LCTabView.swift
+@@ -187,7 +187,19 @@ struct LCTabView: View {
+             case "livecontainer-launch", "install", "open-web-page", "open-url":
+                 sharedModel.selectedTab = .apps
+             case "certificate":
+-                sharedModel.selectedTab = .settings
++                // SideStore or AltStore's way back, the certificate in the
++                // query. Consumed here rather than parked for the Settings
++                // page: FlekDeck's Settings is a full-screen cover mounted
++                // only while it is open, and the handoff from the store
++                // arrives exactly when it is not — the app backgrounded for
++                // the store, or was killed and is cold-launching on this
++                // link. Parking the link for a page that is not mounted
++                // loses the certificate, and nothing tells the user but the
++                // launch-time JIT-less error. Storing it here also covers
++                // the copy LiveContainer takes from a built-in SideStore,
++                // which imports in Settings while the app stays frontmost.
++                storeCertificateFromLink(url)
++                return
+             case "udid", "device-registered":
+                 // The UDID profile's way back: the server that took the device's
+                 // answer redirects here, and the device is asked for. FlekSt0re's
+@@ -209,6 +221,31 @@ struct LCTabView: View {
+         sharedModel.deepLink = url
+     }
+ 
++    /// What `flekdeck://certificate?cert=…&password=…` hands back, stored the
++    /// way every other import stores it. The Settings page keeps a handler of
++    /// its own for links that arrive while it is open, but this one is what
++    /// covers the handoff: the page is a cover that is mounted only while
++    /// open, and the link arrives exactly when it is not.
++    private func storeCertificateFromLink(_ url: URL) {
++        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
++            return
++        }
++        let queryItems = components.queryItems?.reduce(into: [String: String]()) { $0[$1.name.lowercased()] = $1.value } ?? [:]
++        guard let encodedCert = queryItems["cert"]?.removingPercentEncoding,
++              let certData = Data(base64Encoded: encodedCert) else {
++            return
++        }
++        let password = queryItems["password"] ?? ""
++        LCUtils.appGroupUserDefault.set(certData, forKey: "LCCertificateData")
++        LCUtils.appGroupUserDefault.set(password, forKey: "LCCertificatePassword")
++        LCUtils.appGroupUserDefault.set(NSDate.now, forKey: "LCCertificateUpdateDate")
++        // LCSharedUtils resolves the app group by which apps exist in it; a
++        // group chosen that way goes stale when they are removed, so the
++        // resolution is cached like every other import caches it.
++        UserDefaults.standard.set(LCSharedUtils.appGroupID(), forKey: "LCAppGroupID")
++        sharedModel.refreshCertificateStatus()
++    }
++
+     /// Takes whatever URL is waiting, if this window is in a state to act on it.
+     /// Every window runs this, and the first one through clears the URL, so a
+     /// window that is about to be closed as a duplicate can park a document and
 diff --git a/LiveContainerSwiftUI/Views/Settings/LCSettingsView.swift b/LiveContainerSwiftUI/Views/Settings/LCSettingsView.swift
 index bbddee7..f18830e 100644
 --- a/LiveContainerSwiftUI/Views/Settings/LCSettingsView.swift

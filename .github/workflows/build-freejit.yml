@@ -14,8 +14,9 @@ jobs:
     # "failed to build module 'StikJIT'; this SDK is not supported by the
     # compiler", and Xcode 26.x (Swift 6.3) is likewise too old. GitHub
     # ships Xcode 27 only on this preview image — macos-15 tops out at
-    # 26.3 and macos-26 at 26.6. Same runner + version combo as upstream's
-    # own build-external.yml, which documents exactly this constraint.
+    # 26.3 and macos-26 at 26.6. The iPhone Duo sources (LCGuestSideBar.m
+    # and others) additionally need the iOS 27.1 SDK, so Xcode is pinned
+    # to 27.1 below — Swift 6.4.0.34.1, the framework's exact compiler.
     runs-on: xcode-27
     timeout-minutes: 60
 
@@ -230,10 +231,17 @@ jobs:
       - name: Select Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          # 27.0 (27A266a) is the exact compiler whose interface the vendored
-          # StikJIT.xcframework carries; 27.1/27.2 also ship on this image
-          # and also carry Swift 6.4 if you ever bump the pin.
-          xcode-version: "27.0"
+          # Two constraints meet here, and 27.1 satisfies both:
+          # 1. >= Xcode 27.0: the vendored StikJIT.xcframework's Swift interface
+          #    was emitted by Swift 6.4.0.34.1 — Xcode 27.0/27.1 both carry
+          #    exactly that compiler (27.2 carries 6.4.2, also compatible).
+          # 2. >= Xcode 27.1: the iPhone Duo code (LCGuestSideBar.m and four
+          #    other files) uses API_AVAILABLE(ios(27.1)) symbols such as
+          #    UIVerticalBarEdge, which only the iOS 27.1 SDK declares.
+          #    Xcode 27.0's iOS 27.0 SDK fails with "use of undeclared
+          #    identifier 'UIVerticalBarEdge'".
+          # 27.1 (27A9275) is also this image's default Xcode.
+          xcode-version: "27.1"
 
       - name: Build unsigned archive (no Apple Developer account needed)
         run: |

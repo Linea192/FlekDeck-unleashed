@@ -526,6 +526,14 @@ jobs:
         run: |
           mkdir -p build/Payload
           cp -R build/FlekDeck.xcarchive/Products/Applications/FlekDeck.app build/Payload/
+          # Stamp the kit revision into the app version so a build can be told
+          # apart from an older one at a glance: iOS Settings > FlekDeck (or any
+          # About line) shows 0.3.0+cert2 only on a build carrying the v2
+          # certificate-callback fix. The same stamp is echoed into the run log
+          # and the artifact name, so the IPA file itself carries it too.
+          BUILD_STAMP="+cert2"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' build/Payload/FlekDeck.app/Info.plist)$BUILD_STAMP" build/Payload/FlekDeck.app/Info.plist
+          echo "built with sidestore-cert patch v2 (storeCertificateFromLink in LCTabView) — version stamp $BUILD_STAMP"
           cd build
           zip -qry FlekDeck-freejit-unsigned.ipa Payload -x "._*" ".DS_Store" "__MACOSX*"
           ls -lh FlekDeck-freejit-unsigned.ipa
@@ -540,4 +548,5 @@ jobs:
       - name: Summary
         run: |
           echo "### Build done" >> $GITHUB_STEP_SUMMARY
+          echo "This build carries the **v2** SideStore-certificate fix (version stamp: 0.3.0+cert2). If your installed FlekDeck does not show that stamp in iOS Settings, it is the old build — reinstall from this artifact." >> $GITHUB_STEP_SUMMARY
           echo "Download the unsigned IPA from this run's Artifacts, then sign it locally (see README)." >> $GITHUB_STEP_SUMMARY

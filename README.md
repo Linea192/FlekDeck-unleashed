@@ -1,5 +1,5 @@
 <div align="center">
-  <img width="217" height="217" src="https://flekstore.com/img-storage/apps/1565/flekdeck.png" alt="FlekDeck icon">
+  <img width="217" height="217" src="flekdeck.png" alt="FlekDeck icon">
 </div>
 
 <div align="center">

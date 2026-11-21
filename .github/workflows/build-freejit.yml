@@ -1,4 +1,4 @@
-name: Build FlekDeck (free built-in JIT)
+name: Build FlekDeck (free built-in JIT + SideStore certificate)
 
 on:
   workflow_dispatch:
@@ -227,6 +227,184 @@ jobs:
             echo "fork already carries the free-JIT changes — nothing to apply"
           else
             echo "FATAL: neither upstream Premium gates nor fork patch markers found — unrecognized source; re-do the patch (kit README)"; exit 1
+          fi
+      - name: Apply SideStore-certificate patch (embedded, self-contained)
+        run: |
+          set -eu
+          # Self-contained: the patch is embedded below and written to /tmp at run
+          # time. It wires LiveContainer's dormant SideStore-certificate engine back
+          # into the Flek settings UI: a card on General that asks SideStore/AltStore
+          # to hand over the free-account certificate it signed this FlekDeck with.
+          # The engine itself (importCertificateFromSideStore, the keychain read, the
+          # flekdeck://certificate callback) is already in the source — upstream only
+          # dropped the button when the settings UI was redesigned.
+          gate_files=(
+            LiveContainerSwiftUI/FlekDeck/Settings/FlekGeneralView.swift
+            LiveContainerSwiftUI/Views/Settings/LCSettingsView.swift
+            Resources/Localizable.xcstrings
+          )
+          for f in "${gate_files[@]}"; do
+            test -f "$f" || { echo "FATAL: expected $f not found — upstream restructured the source; re-do the patch (kit README)"; exit 1; }
+          done
+          has() { grep -qF -- "$2" "$1"; }
+          engine=0; patched=0
+          if has LiveContainerSwiftUI/Views/Settings/LCSettingsView.swift 'func importCertificateFromSideStore()'; then
+            engine=1
+          fi
+          if has LiveContainerSwiftUI/FlekDeck/Settings/FlekGeneralView.swift 'var onImportFromStore: (() -> Void)?'; then
+            patched=1
+          fi
+          # The patch wires UI to the engine without touching it, so a patched tree
+          # still carries the engine: engine+markers is the normal patched state,
+          # and engine alone is the pristine one. Only an engine gone from a tree
+          # that still has the UI markers is a mixed state — wiring with nothing to
+          # wire to.
+          if [ "$engine" = 0 ]; then
+            echo "FATAL: the SideStore certificate engine importCertificateFromSideStore is gone from LCSettingsView — upstream restructured or removed it; re-do the patch (kit README)"; exit 1
+          fi
+          if [ "$patched" = 1 ]; then
+            echo "fork already carries the SideStore certificate card — nothing to apply"
+          else
+            cat > /tmp/sidestore-cert.patch <<'SIDESTORE_CERT_PATCH_EOF'
+          diff --git a/LiveContainerSwiftUI/FlekDeck/Settings/FlekGeneralView.swift b/LiveContainerSwiftUI/FlekDeck/Settings/FlekGeneralView.swift
+          index 2f176d1..818762f 100644
+          --- a/LiveContainerSwiftUI/FlekDeck/Settings/FlekGeneralView.swift
+          +++ b/LiveContainerSwiftUI/FlekDeck/Settings/FlekGeneralView.swift
+          @@ -48,6 +48,11 @@ struct FlekGeneralView<JITPage: View>: View {
+               let managesCertificate: Bool
+               /// Forgets the stored certificate. The page asks first.
+               let onRemoveCertificate: () -> Void
+          +    /// Asks the store that installed this FlekDeck — SideStore or AltStore —
+          +    /// to hand over the free-account certificate it keeps, the way
+          +    /// LiveContainer takes one. Nil where there is no store to ask, and the
+          +    /// row for it is hidden.
+          +    var onImportFromStore: (() -> Void)? = nil
+               /// Where "Set Up JIT" leads: the JIT category's own page.
+               @ViewBuilder let jitPage: () -> JITPage
+           
+          @@ -159,6 +164,9 @@ struct FlekGeneralView<JITPage: View>: View {
+                               setupCard
+                           }
+                           certificateCard
+          +                if showsImportFromStore {
+          +                    importFromStoreCard
+          +                }
+                           NavigationLink {
+                               jitPage()
+                           } label: {
+          @@ -407,6 +415,59 @@ struct FlekGeneralView<JITPage: View>: View {
+                   }
+               }
+           
+          +    /// The store that installed this FlekDeck, where that was SideStore or
+          +    /// AltStore — the two that keep the certificate a free Apple ID signed
+          +    /// this FlekDeck with, which the card below asks them to hand over.
+          +    /// Nil for any other installer, and the card is hidden.
+          +    private var importStoreName: String? {
+          +        switch LCUtils.store() {
+          +        case .SideStore: return "SideStore"
+          +        case .AltStore: return "AltStore"
+          +        default: return nil
+          +        }
+          +    }
+          +
+          +    /// Whether the card that asks the store can be shown: there is one to ask,
+          +    /// this copy manages its own certificate, and this build can use one at
+          +    /// all. LiveContainer shows the same row wherever its store check passes;
+          +    /// the last condition is FlekDeck's own, since a build that cannot sign
+          +    /// has no use for what the store would hand back.
+          +    private var showsImportFromStore: Bool {
+          +        onImportFromStore != nil && importStoreName != nil
+          +            && managesCertificate && LCProvisioningProfile.isAppDevelopmentSigned
+          +    }
+          +
+          +    /// Asking the store that installed this FlekDeck for the certificate it
+          +    /// keeps, rather than exporting a .p12 by hand. It appears beside the
+          +    /// import page's card — both ways are open — and again once a certificate
+          +    /// is imported, as the refresh it is then: a store's certificate runs
+          +    /// out with the sideload's week, and the store's own refresh hands back
+          +    /// one valid again.
+          +    ///
+          +    /// The engine is LiveContainer's own, left over from FlekDeck's fork of
+          +    /// it: a build-in SideStore is read from the keychain directly, and any
+          +    /// SideStore or AltStore is asked through its URL scheme, handing the
+          +    /// certificate back through the flekdeck://certificate link this app
+          +    /// already opens.
+          +    private var importFromStoreCard: some View {
+          +        let storeName = importStoreName ?? ""
+          +        return Button {
+          +            onImportFromStore?()
+          +        } label: {
+          +            FlekSetupOption(
+          +                icon: .symbol("arrow.down.circle.fill", .green),
+          +                title: (sharedModel.isCertificateImported
+          +                        ? "lc.settings.refreshCertificateFromStore %@"
+          +                        : "lc.settings.importCertificateFromStore %@").localizeWithFormat(storeName),
+          +                subtitle: "lc.flek.certImport.store.desc %@".localizeWithFormat(storeName),
+          +                tray: {
+          +                    FlekSetupPoints(points: ["lc.flek.certImport.store.point1".loc])
+          +                }
+          +            )
+          +        }
+          +        .buttonStyle(FlekCardPressStyle())
+          +    }
+          +
+               private func certificateOption<Tray: View>(
+                   isDimmed: Bool = false,
+                   showsChevron: Bool = false,
+          diff --git a/LiveContainerSwiftUI/Views/Settings/LCSettingsView.swift b/LiveContainerSwiftUI/Views/Settings/LCSettingsView.swift
+          index bbddee7..f18830e 100644
+          --- a/LiveContainerSwiftUI/Views/Settings/LCSettingsView.swift
+          +++ b/LiveContainerSwiftUI/Views/Settings/LCSettingsView.swift
+          @@ -857,6 +857,10 @@ struct LCSettingsView: View {
+                   FlekGeneralView(
+                       managesCertificate: sharedModel.multiLCStatus != 2,
+                       onRemoveCertificate: { clearCertificate() },
+          +            // SideStore and AltStore only: the engine importCertificateFromSideStore,
+          +            // carried over from LiveContainer. A copy installed any other way has
+          +            // no store to ask, and the card stays hidden.
+          +            onImportFromStore: store == .SideStore || store == .AltStore ? { Task { await importCertificateFromSideStore() } } : nil,
+                       jitPage: { jitPage }
+                   )
+                   .navigationBarTitleDisplayMode(.inline)
+          diff --git a/Resources/Localizable.xcstrings b/Resources/Localizable.xcstrings
+          index bd77146..c66e943 100644
+          --- a/Resources/Localizable.xcstrings
+          +++ b/Resources/Localizable.xcstrings
+          @@ -16373,6 +16373,28 @@
+                   }
+                 }
+               },
+          +    "lc.flek.certImport.store.desc %@" : {
+          +      "extractionState" : "manual",
+          +      "localizations" : {
+          +        "en" : {
+          +          "stringUnit" : {
+          +            "state" : "translated",
+          +            "value" : "Takes the free-account certificate %@ signed this FlekDeck with, so there is nothing to export by hand."
+          +          }
+          +        }
+          +      }
+          +    },
+          +    "lc.flek.certImport.store.point1" : {
+          +      "extractionState" : "manual",
+          +      "localizations" : {
+          +        "en" : {
+          +          "stringUnit" : {
+          +            "state" : "translated",
+          +            "value" : "LiveContainer's own flow, carried over by the fork"
+          +          }
+          +        }
+          +      }
+          +    },
+               "lc.flek.certImport.warning" : {
+                 "extractionState" : "manual",
+                 "localizations" : {
+          SIDESTORE_CERT_PATCH_EOF
+            git apply --check /tmp/sidestore-cert.patch \
+              || { echo "FATAL: sidestore-cert patch no longer applies — upstream moved the code; re-generate it (kit README, Upgrading section)"; exit 1; }
+            git apply /tmp/sidestore-cert.patch
+            echo "sidestore-cert patch applied"
           fi
       - name: Select Xcode
         uses: maxim-lobanov/setup-xcode@v1

@@ -13,10 +13,10 @@ jobs:
     # toolchains cannot even parse it: Xcode 16.4 (Swift 6.1) dies with
     # "failed to build module 'StikJIT'; this SDK is not supported by the
     # compiler", and Xcode 26.x (Swift 6.3) is likewise too old. GitHub
-    # ships Xcode 27 only on this preview image — macos-15 tops out at
+    # ships Xcode 27 only on this preview image â€” macos-15 tops out at
     # 26.3 and macos-26 at 26.6. The iPhone Duo sources (LCGuestSideBar.m
     # and others) additionally need the iOS 27.1 SDK, so Xcode is pinned
-    # to 27.1 below — Swift 6.4.0.34.1, the framework's exact compiler.
+    # to 27.1 below â€” Swift 6.4.0.34.1, the framework's exact compiler.
     runs-on: xcode-27
     timeout-minutes: 60
 
@@ -40,7 +40,7 @@ jobs:
             LiveContainerSwiftUI/FlekDeck/Settings/FlekBuiltInJITSection.swift
           )
           for f in "${gate_files[@]}"; do
-            test -f "$f" || { echo "FATAL: expected $f not found — upstream restructured the source; re-do the patch (kit README)"; exit 1; }
+            test -f "$f" || { echo "FATAL: expected $f not found â€” upstream restructured the source; re-do the patch (kit README)"; exit 1; }
           done
           has() { grep -qF -- "$2" "$1"; }
           gated=0; patched=0
@@ -53,7 +53,7 @@ jobs:
             patched=1
           fi
           if [ "$gated" = 1 ] && [ "$patched" = 1 ]; then
-            echo "FATAL: mixed state — some Premium gates remain while fork patch markers are present; sort the source out and re-run"; exit 1
+            echo "FATAL: mixed state â€” some Premium gates remain while fork patch markers are present; sort the source out and re-run"; exit 1
           fi
           if [ "$gated" = 1 ]; then
             cat > /tmp/free-jit.patch <<'FREE_JIT_PATCH_EOF'
@@ -68,7 +68,7 @@ jobs:
           -    // Built-in JIT is a Premium feature: the app says how long Premium lasts,
           -    // or that it has just confirmed it for this launch. The app asks the same
           -    // before a launch from the home screen, but not every launch starts
-          -    // there — a link opened in another guest leads straight here. Ahead of
+          -    // there â€” a link opened in another guest leads straight here. Ahead of
           -    // everything else, so that a launch that is refused sets nothing up and
           -    // is told why, whatever else it lacks.
           -    {
@@ -78,7 +78,7 @@ jobs:
           -        NSTimeInterval now = MAX(clock, [shared doubleForKey:@"FSAccessClockHighWaterMark"]);
           -        BOOL justConfirmed = fabs(clock - [shared doubleForKey:@"FlekPremiumConfirmedAt"]) < 60;
           -        if (!justConfirmed && [shared doubleForKey:@"FlekPremiumUntil"] <= now) {
-          -            return @"FlekJIT needs Premium. Open FlekDeck to renew Premium, or choose StikDebug in Settings › JIT, which is free.";
+          -            return @"FlekJIT needs Premium. Open FlekDeck to renew Premium, or choose StikDebug in Settings â€º JIT, which is free.";
           -        }
           -    }
           +    // Built-in JIT is a Premium feature upstream; this fork build removes the
@@ -118,7 +118,7 @@ jobs:
           -    /// Runs `proceed` once Premium is settled, with the server where nothing
           -    /// kept says yes: it may have been got a moment ago. Without Premium the
           -    /// offer takes the steps' place, and says how to get it.
-          +    /// Runs `proceed` once Premium is settled — which in this fork build it
+          +    /// Runs `proceed` once Premium is settled â€” which in this fork build it
           +    /// always is: built-in JIT is free here, so no confirmation is asked for
           +    /// and nothing takes the steps' place.
                private func withPremium(_ proceed: @escaping () -> Void) {
@@ -151,7 +151,7 @@ jobs:
            
           -    /// What is kept about Premium, and the server's word where that says no,
           -    /// unless nothing here could be used with it either.
-          +    /// What is kept about Premium — always active in this fork build, where
+          +    /// What is kept about Premium â€” always active in this fork build, where
           +    /// built-in JIT is free, so the server is never asked from here.
                private func refreshPremium() async {
           -        isPremium = FlekPremium.isActive
@@ -220,13 +220,13 @@ jobs:
            }
           FREE_JIT_PATCH_EOF
             git apply --check /tmp/free-jit.patch \
-              || { echo "FATAL: free-jit patch no longer applies — upstream moved the code; re-generate it (kit README, Upgrading section)"; exit 1; }
+              || { echo "FATAL: free-jit patch no longer applies â€” upstream moved the code; re-generate it (kit README, Upgrading section)"; exit 1; }
             git apply /tmp/free-jit.patch
             echo "free-JIT patch applied"
           elif [ "$patched" = 1 ]; then
-            echo "fork already carries the free-JIT changes — nothing to apply"
+            echo "fork already carries the free-JIT changes â€” nothing to apply"
           else
-            echo "FATAL: neither upstream Premium gates nor fork patch markers found — unrecognized source; re-do the patch (kit README)"; exit 1
+            echo "FATAL: neither upstream Premium gates nor fork patch markers found â€” unrecognized source; re-do the patch (kit README)"; exit 1
           fi
       - name: Apply SideStore-certificate patch (embedded, self-contained)
         run: |
@@ -234,12 +234,12 @@ jobs:
           # Self-contained: the patch is embedded below and written to /tmp at run
           # time. It wires LiveContainer's dormant SideStore-certificate engine back
           # into the Flek settings UI: a card on General that asks SideStore/AltStore
-          # to hand over the free-account certificate it signed this FlekDeck with —
+          # to hand over the free-account certificate it signed this FlekDeck with â€”
           # and it consumes the flekdeck://certificate callback link directly in
           # LCTabView, so the certificate is stored even when the handoff returns
           # while Settings (a full-screen cover) is not mounted. The engine itself
           # (importCertificateFromSideStore, the keychain read, the URL callback) is
-          # already in the source — upstream only dropped the button and left the
+          # already in the source â€” upstream only dropped the button and left the
           # link parked for a settings page that FlekDeck mounts only while open.
           gate_files=(
             LiveContainerSwiftUI/FlekDeck/Settings/FlekGeneralView.swift
@@ -248,7 +248,7 @@ jobs:
             Resources/Localizable.xcstrings
           )
           for f in "${gate_files[@]}"; do
-            test -f "$f" || { echo "FATAL: expected $f not found — upstream restructured the source; re-do the patch (kit README)"; exit 1; }
+            test -f "$f" || { echo "FATAL: expected $f not found â€” upstream restructured the source; re-do the patch (kit README)"; exit 1; }
           done
           has() { grep -qF -- "$2" "$1"; }
           engine=0; patched=0; patched_v1=0
@@ -265,13 +265,13 @@ jobs:
           # The patch wires UI to the engine without touching it, so a patched tree
           # still carries the engine: engine+markers is the normal patched state,
           # and engine alone is the pristine one. Only an engine gone from a tree
-          # that still has the UI markers is a mixed state — wiring with nothing to
+          # that still has the UI markers is a mixed state â€” wiring with nothing to
           # wire to.
           if [ "$engine" = 0 ]; then
-            echo "FATAL: the SideStore certificate engine importCertificateFromSideStore is gone from LCSettingsView — upstream restructured or removed it; re-do the patch (kit README)"; exit 1
+            echo "FATAL: the SideStore certificate engine importCertificateFromSideStore is gone from LCSettingsView â€” upstream restructured or removed it; re-do the patch (kit README)"; exit 1
           fi
           if [ "$patched" = 1 ]; then
-            echo "fork already carries the SideStore certificate card and callback consumption — nothing to apply"
+            echo "fork already carries the SideStore certificate card and callback consumption â€” nothing to apply"
           elif [ "$patched_v1" = 1 ]; then
             echo "FATAL: this fork carries the v1 revision of the SideStore-certificate patch (the card, but without the callback being consumed in LCTabView). That revision loses the certificate when the store hands it back while Settings is closed. Either commit nothing and let this step apply the current patch, or re-generate: git checkout -- the four files and git apply the new patches/sidestore-cert.patch (kit README, Upgrading section)"; exit 1
           else
@@ -284,7 +284,7 @@ jobs:
                let managesCertificate: Bool
                /// Forgets the stored certificate. The page asks first.
                let onRemoveCertificate: () -> Void
-          +    /// Asks the store that installed this FlekDeck — SideStore or AltStore —
+          +    /// Asks the store that installed this FlekDeck â€” SideStore or AltStore â€”
           +    /// to hand over the free-account certificate it keeps, the way
           +    /// LiveContainer takes one. Nil where there is no store to ask, and the
           +    /// row for it is hidden.
@@ -307,7 +307,7 @@ jobs:
                }
            
           +    /// The store that installed this FlekDeck, where that was SideStore or
-          +    /// AltStore — the two that keep the certificate a free Apple ID signed
+          +    /// AltStore â€” the two that keep the certificate a free Apple ID signed
           +    /// this FlekDeck with, which the card below asks them to hand over.
           +    /// Nil for any other installer, and the card is hidden.
           +    private var importStoreName: String? {
@@ -330,7 +330,7 @@ jobs:
           +
           +    /// Asking the store that installed this FlekDeck for the certificate it
           +    /// keeps, rather than exporting a .p12 by hand. It appears beside the
-          +    /// import page's card — both ways are open — and again once a certificate
+          +    /// import page's card â€” both ways are open â€” and again once a certificate
           +    /// is imported, as the refresh it is then: a store's certificate runs
           +    /// out with the sideload's week, and the store's own refresh hands back
           +    /// one valid again.
@@ -375,7 +375,7 @@ jobs:
           +                // query. Consumed here rather than parked for the Settings
           +                // page: FlekDeck's Settings is a full-screen cover mounted
           +                // only while it is open, and the handoff from the store
-          +                // arrives exactly when it is not — the app backgrounded for
+          +                // arrives exactly when it is not â€” the app backgrounded for
           +                // the store, or was killed and is cold-launching on this
           +                // link. Parking the link for a page that is not mounted
           +                // loses the certificate, and nothing tells the user but the
@@ -391,7 +391,7 @@ jobs:
                    sharedModel.deepLink = url
                }
            
-          +    /// What `flekdeck://certificate?cert=…&password=…` hands back, stored the
+          +    /// What `flekdeck://certificate?cert=â€¦&password=â€¦` hands back, stored the
           +    /// way every other import stores it. The Settings page keeps a handler of
           +    /// its own for links that arrive while it is open, but this one is what
           +    /// covers the handoff: the page is a cover that is mounted only while
@@ -469,7 +469,7 @@ jobs:
                  "localizations" : {
           SIDESTORE_CERT_PATCH_EOF
             git apply --check /tmp/sidestore-cert.patch \
-              || { echo "FATAL: sidestore-cert patch no longer applies — upstream moved the code; re-generate it (kit README, Upgrading section)"; exit 1; }
+              || { echo "FATAL: sidestore-cert patch no longer applies â€” upstream moved the code; re-generate it (kit README, Upgrading section)"; exit 1; }
             git apply /tmp/sidestore-cert.patch
             echo "sidestore-cert patch applied"
           fi
@@ -480,11 +480,11 @@ jobs:
           # reach after the signing store re-signs the app. The stock files ask for
           # groups that only work for the original upstream team's own signing,
           # LiveProcess Release asks for none, and the Share/Launch extensions ask
-          # for none either — every extension shares the group the app writes into
+          # for none either â€” every extension shares the group the app writes into
           # (the guest launcher reads the certificate through it; the widget reads
           # its data the same way). The patch swaps them all to the build variables
           # that expand to the bare store groups (Release has no team suffix), which
-          # SideStore/AltStore append their team to at install time — the same
+          # SideStore/AltStore append their team to at install time â€” the same
           # group.com.SideStore.SideStore.<team> that LCSharedUtils probes.
           gate_files=(
             entitlements.xml
@@ -495,7 +495,7 @@ jobs:
             LaunchAppExtension/LaunchAppExtension.entitlements
           )
           for f in "${gate_files[@]}"; do
-            test -f "$f" || { echo "FATAL: expected $f not found — upstream restructured the source; re-do the patch (kit README)"; exit 1; }
+            test -f "$f" || { echo "FATAL: expected $f not found â€” upstream restructured the source; re-do the patch (kit README)"; exit 1; }
           done
           has() { grep -qF -- "$2" "$1"; }
           hardcoded=0; variables=0
@@ -510,7 +510,7 @@ jobs:
             variables=1
           fi
           if [ "$variables" = 1 ]; then
-            echo "fork already carries the app-group entitlements fix — nothing to apply"
+            echo "fork already carries the app-group entitlements fix â€” nothing to apply"
           elif [ "$hardcoded" = 1 ]; then
             cat > /tmp/appgroup-entitlements.patch <<'APPGROUP_PATCH_EOF'
           diff --git a/LiveProcess/LiveProcessRelease.entitlements b/LiveProcess/LiveProcessRelease.entitlements
@@ -586,18 +586,18 @@ jobs:
            	<true/>
           APPGROUP_PATCH_EOF
             git apply --check /tmp/appgroup-entitlements.patch \
-              || { echo "FATAL: app-group patch no longer applies — upstream moved the files; re-generate it (kit README, Upgrading section)"; exit 1; }
+              || { echo "FATAL: app-group patch no longer applies â€” upstream moved the files; re-generate it (kit README, Upgrading section)"; exit 1; }
             git apply /tmp/appgroup-entitlements.patch
             echo "app-group entitlements patch applied"
           else
-            echo "FATAL: entitlements in an unrecognized state (no hardcoded upstream-team groups, no variables) — re-do the patch (kit README)"; exit 1
+            echo "FATAL: entitlements in an unrecognized state (no hardcoded upstream-team groups, no variables) â€” re-do the patch (kit README)"; exit 1
           fi
       - name: Select Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
           # Two constraints meet here, and 27.1 satisfies both:
           # 1. >= Xcode 27.0: the vendored StikJIT.xcframework's Swift interface
-          #    was emitted by Swift 6.4.0.34.1 — Xcode 27.0/27.1 both carry
+          #    was emitted by Swift 6.4.0.34.1 â€” Xcode 27.0/27.1 both carry
           #    exactly that compiler (27.2 carries 6.4.2, also compatible).
           # 2. >= Xcode 27.1: the iPhone Duo code (LCGuestSideBar.m and four
           #    other files) uses API_AVAILABLE(ios(27.1)) symbols such as
@@ -613,13 +613,13 @@ jobs:
           # Log to a file so failures can be tailed in full below: xcodebuild's
           # own error output is far longer than what any pretty printer shows.
           # GitHub runs this with bash -e, so the exit code is captured with
-          # `|| status=$?` — a bare failing command would abort before the
+          # `|| status=$?` â€” a bare failing command would abort before the
           # tail code below could run.
           #
           # Signing is AD-HOC (identity "-"), not disabled. A build with
           # CODE_SIGNING_ALLOWED=NO produces a binary with no entitlements
           # at all; a sideload store reads entitlements from the IPA's code
-          # signature, finds none, and provisions no app groups — so the
+          # signature, finds none, and provisions no app groups â€” so the
           # app-group defaults suites resolve to "Unknown" in every process
           # and the UI and the guest launcher end up writing/reading
           # different private domains (the certificate import "works" in
@@ -646,24 +646,24 @@ jobs:
             tail -n 400 build.log
           fi
           if [ "$status" -ne 0 ]; then
-            echo "=== xcodebuild failed (exit $status) — last 120 lines of build.log ==="
+            echo "=== xcodebuild failed (exit $status) â€” last 120 lines of build.log ==="
             tail -n 120 build.log
             exit 1
           fi
           test -d build/FlekDeck.xcarchive/Products/Applications/FlekDeck.app \
-            || { echo "archive missing FlekDeck.app — build failed"; exit 1; }
+            || { echo "archive missing FlekDeck.app â€” build failed"; exit 1; }
 
       - name: Sign IPA entitlements in a store-readable form (ldid)
         run: |
           set -eu
           # The sideload store reads an app's entitlements from the code
           # signature of the IPA (XML plist in the entitlements slot) to decide
-          # which entitlements — including app groups — to provision with your
+          # which entitlements â€” including app groups â€” to provision with your
           # Apple ID. What xcodebuild's own ad-hoc pass leaves in that slot is
           # not reliably the form the store parses: an entitlements blob the
           # store cannot decode reads as "the app asks for nothing", the store
           # then re-signs with no application-groups at all, and every
-          # app-group defaults suite resolves to "Unknown" — the certificate
+          # app-group defaults suite resolves to "Unknown" â€” the certificate
           # import appears to work, but the guest-launch gate never sees it.
           # This pass re-signs every entitlement-bearing binary with ldid,
           # which writes exactly the XML plist the store parses. The store
@@ -672,18 +672,50 @@ jobs:
           brew install ldid
           cd build/FlekDeck.xcarchive/Products/Applications
           APP=FlekDeck.app
-          # The store groups as a plain XML plist: SideStore/AltStore append
-          # your Apple ID's team suffix at install time, producing exactly the
-          # group.com.SideStore.SideStore.<team> the runtime probes.
+          # The full entitlement set the app asks for, as a plain XML plist:
+          # the store groups (SideStore/AltStore append your Apple ID's team
+          # suffix at install, producing exactly the group.com.SideStore.
+          # SideStore.<team> the runtime probes), the keychain access groups
+          # (the 128 com.kdt.livecontainer.shared* groups FlekDeck's guest
+          # containers share keychain items under â€” SecItem.m's hooks and the
+          # diagnostics "keychain-access-groups Correct" row read them from
+          # exactly here), the team identifier, and get-task-allow. The
+          # AppIdentifierPrefix form â€” no team prefix baked in â€” is what
+          # upstream ships in every entitlements file and what both signers
+          # rewrite to <TeamID>.<suffix> at install (SideSign
+          # CodeSignerAPI.swift / AltStore ALTSigner.mm do precisely this).
+          # ldid -S REPLACES the whole entitlements dict, so this plist must
+          # carry everything the app means to keep â€” the v4 revision embedded
+          # the groups alone and the installed app then declared no keychain
+          # groups at all, which is exactly the red
+          # "keychain-access-groups Correct: No" row on the diagnostics page.
           cat > /tmp/groups.plist <<'GROUPS_PLIST_EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
+          	<key>com.apple.developer.kernel.increased-memory-limit</key>
+          	<true/>
+          	<key>com.apple.developer.team-identifier</key>
+          	<string>$(DEVELOPMENT_TEAM)</string>
           	<key>com.apple.security.application-groups</key>
           	<array>
           		<string>group.com.SideStore.SideStore</string>
           		<string>group.com.rileytestut.AltStore</string>
+          	</array>
+          	<key>get-task-allow</key>
+          	<true/>
+          	<key>keychain-access-groups</key>
+          	<array>
+          GROUPS_PLIST_EOF
+          for i in $(seq 0 127); do
+            if [ "$i" = 0 ]; then
+              echo "		<string>\$(AppIdentifierPrefix)com.kdt.livecontainer.shared</string>" >> /tmp/groups.plist
+            else
+              echo "		<string>\$(AppIdentifierPrefix)com.kdt.livecontainer.shared.$i</string>" >> /tmp/groups.plist
+            fi
+          done
+          cat >> /tmp/groups.plist <<'GROUPS_PLIST_EOF'
           	</array>
           </dict>
           </plist>
@@ -692,12 +724,12 @@ jobs:
           # (guest launcher), WidgetExtension, ShareExtension,
           # LaunchAppExtension. LoopbackVPN asks for a network-extension
           # entitlement a free Apple ID cannot be granted, so it keeps its own
-          # entitlements — the store drops that key when signing and the
+          # entitlements â€” the store drops that key when signing and the
           # built-in VPN falls back to LocalDevVPN, as designed.
           ldid -S/tmp/groups.plist "$APP/FlekDeck"
           for appex in LiveProcess WidgetExtension ShareExtension LaunchAppExtension; do
             BIN="$APP/PlugIns/$appex.appex/$appex"
-            test -f "$BIN" || { echo "FATAL: $BIN missing — extension layout changed; update the sign step"; exit 1; }
+            test -f "$BIN" || { echo "FATAL: $BIN missing â€” extension layout changed; update the sign step"; exit 1; }
             ldid -S/tmp/groups.plist "$BIN"
           done
           cat > /tmp/vpn.plist <<'VPN_PLIST_EOF'
@@ -713,7 +745,7 @@ jobs:
           </plist>
           VPN_PLIST_EOF
           VPN_BIN="$APP/PlugIns/LoopbackVPN.appex/LoopbackVPN"
-          test -f "$VPN_BIN" || { echo "FATAL: $VPN_BIN missing — extension layout changed; update the sign step"; exit 1; }
+          test -f "$VPN_BIN" || { echo "FATAL: $VPN_BIN missing â€” extension layout changed; update the sign step"; exit 1; }
           ldid -S/tmp/vpn.plist "$VPN_BIN"
           # Frameworks and dylibs carry no entitlements of their own; ldid
           # signs them ad-hoc so the store accepts the bundle. -perm -111 is
@@ -726,9 +758,10 @@ jobs:
             ldid -S "$dy"
           done
           # Self-verification: decode the entitlements slot ourselves and
-          # require the groups to be present as literal XML, so a silent
+          # require the full v5 set to be present as literal XML, so a silent
           # regression in the sign step fails the build instead of shipping
-          # an IPA the store reads as "asks for nothing".
+          # an IPA the store reads as "asks for nothing" â€” or one that asks
+          # for no keychain groups, which is the v4 red row.
           check() {
             BIN="$1"
             OUT=$(ldid -e "$BIN" 2>/dev/null || true)
@@ -737,6 +770,18 @@ jobs:
             fi
             printf '%s' "$OUT" | grep -q 'group.com.SideStore.SideStore' \
               || { echo "FATAL: $BIN entitlements miss the SideStore group"; exit 1; }
+            if ! printf '%s' "$OUT" | grep -q 'keychain-access-groups'; then
+              echo "FATAL: $BIN entitlements slot carries no keychain-access-groups"; exit 1
+            fi
+            # every shared group, base and .1-.127, exactly what the runtime
+            # (SecItem.m hooks, the diagnostics row) requires after the store
+            # prefixes them with the team
+            MISSING=$(printf '%s' "$OUT" | grep -c 'com.kdt.livecontainer.shared' || true)
+            if [ "${MISSING:-0}" -lt 128 ]; then
+              echo "FATAL: $BIN entitlements carry only $MISSING/128 keychain groups"; exit 1
+            fi
+            printf '%s' "$OUT" | grep -q 'get-task-allow' \
+              || { echo "FATAL: $BIN entitlements miss get-task-allow"; exit 1; }
           }
           check "$APP/FlekDeck"
           for appex in LiveProcess WidgetExtension ShareExtension LaunchAppExtension; do
@@ -744,7 +789,7 @@ jobs:
           done
           echo "--- app entitlements as signed (ldid) ---"
           ldid -e "$APP/FlekDeck"
-          echo "--- verification passed: all group-bearing binaries ask for the store groups ---"
+          echo "--- verification passed: all group-bearing binaries ask for the store groups AND the 128 keychain groups ---"
 
       - name: Package IPA (ldid-signed, store re-signs it on install)
         run: |
@@ -752,12 +797,12 @@ jobs:
           cp -R build/FlekDeck.xcarchive/Products/Applications/FlekDeck.app build/Payload/
           # Stamp the kit revision into the app version so a build can be told
           # apart from an older one at a glance: iOS Settings > FlekDeck (or any
-          # About line) shows 0.3.0+cert4 only on a build carrying the v4
-          # store-readable entitlements fix. The same stamp is echoed into the
+          # About line) shows 0.3.0+cert5 only on a build carrying the v5
+          # keychain-entitlements fix. The same stamp is echoed into the
           # run log, so the run log says which revision a build is.
-          BUILD_STAMP="+cert4"
+          BUILD_STAMP="+cert5"
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' build/Payload/FlekDeck.app/Info.plist)$BUILD_STAMP" build/Payload/FlekDeck.app/Info.plist
-          echo "built with kit revision v4: certificate callback + app-group entitlements + store-readable ldid signing — version stamp $BUILD_STAMP"
+          echo "built with kit revision v5: certificate callback + app-group entitlements + keychain-access-groups in the store-readable ldid entitlements â€” version stamp $BUILD_STAMP"
           cd build
           zip -qry FlekDeck-freejit-ldid.ipa Payload -x "._*" ".DS_Store" "__MACOSX*"
           ls -lh FlekDeck-freejit-ldid.ipa
@@ -772,5 +817,5 @@ jobs:
       - name: Summary
         run: |
           echo "### Build done" >> $GITHUB_STEP_SUMMARY
-          echo "This build is kit revision **v4** (version stamp: 0.3.0+cert4): certificate callback fix + app-group entitlements for the app AND every extension + ldid signing in the XML form the store parses. On anything older the certificate import cannot stick — reinstall from this artifact." >> $GITHUB_STEP_SUMMARY
+          echo "This build is kit revision **v5** (version stamp: 0.3.0+cert5): certificate callback fix + app-group entitlements for the app AND every extension + keychain-access-groups (the 128 shared groups the guest containers use) in the ldid entitlements the store parses. On anything older the certificate import cannot stick or the diagnostics page shows `keychain-access-groups Correct: No` â€” reinstall from this artifact." >> $GITHUB_STEP_SUMMARY
           echo "Install this IPA through SideStore/AltStore (it re-signs it with your account and provisions the app groups). Delete the old FlekDeck install first if the diagnostics page shows App Group ID: Unknown." >> $GITHUB_STEP_SUMMARY

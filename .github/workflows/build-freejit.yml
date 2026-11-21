@@ -1,4 +1,4 @@
-name: Build FlekDeck (free built-in JIT)
+)
 
 on:
   workflow_dispatch:
@@ -8,11 +8,15 @@ on:
 
 jobs:
   build:
-    # macos-15 is the image that actually ships Xcode 16.4. macos-latest
-    # now points at macOS 26 images whose oldest Xcode is 26.0.1 — the
-    # upstream FlekDeck build.yml pins 16.4 on macos-latest too and its CI
-    # has the same failure; pinning the runner is the fix.
-    runs-on: macos-15
+    # FlekDeck vendors StikJIT.xcframework, whose Swift interface was emitted
+    # by Xcode 27's Swift 6.4 compiler (swiftlang-6.4.0.34.1). Older
+    # toolchains cannot even parse it: Xcode 16.4 (Swift 6.1) dies with
+    # "failed to build module 'StikJIT'; this SDK is not supported by the
+    # compiler", and Xcode 26.x (Swift 6.3) is likewise too old. GitHub
+    # ships Xcode 27 only on this preview image — macos-15 tops out at
+    # 26.3 and macos-26 at 26.6. Same runner + version combo as upstream's
+    # own build-external.yml, which documents exactly this constraint.
+    runs-on: xcode-27
     timeout-minutes: 60
 
     steps:
@@ -223,58 +227,23 @@ jobs:
           else
             echo "FATAL: neither upstream Premium gates nor fork patch markers found — unrecognized source; re-do the patch (kit README)"; exit 1
           fi
-      - name: Pin Kingfisher 8.12.0 (Xcode 16.4 / Swift 6.1 tools compatible)
-        run: |
-          set -eu
-          # Why: FlekDeck's checked-in Package.resolved pins Kingfisher 8.14.0,
-          # whose Package.swift declares swift-tools-version 6.2 — a manifest
-          # only Xcode 26's tools can parse. This workflow deliberately builds
-          # with Xcode 16.4 (Swift 6.1 tools) on macos-15, so package
-          # resolution dies with:
-          #   package 'kingfisher' @ 8.14.0 is using Swift tools version 6.2.0
-          #   but the installed version is 6.1.0
-          # 8.12.0 is the last Kingfisher whose manifest still declares tools
-          # 5.1, it satisfies the project's upToNextMajor(8.6.2) requirement,
-          # and the API surface FlekDeck uses (KFImage / ImageCache /
-          # KingfisherManager) is stable across 8.x. xcodebuild honors the
-          # checked-in Package.resolved (your failing run resolved exactly
-          # 8.14.0, the pinned revision, not the newer 8.16.0), so rewriting
-          # the pin makes it fetch 8.12.0 instead.
-          RESOLVED="LiveContainer.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
-          test -f "$RESOLVED" || {
-            echo "FATAL: $RESOLVED not found — upstream restructured; this pin step needs a re-check"
-            exit 1
-          }
-          python3 - "$RESOLVED" <<'PIN_KINGFISHER_EOF'
-          import json, sys
-          path = sys.argv[1]
-          with open(path) as f:
-              resolved = json.load(f)
-          pin = next((p for p in resolved.get("pins", []) if "Kingfisher" in p.get("location", "")), None)
-          if pin is None:
-              print("FATAL: Kingfisher no longer in Package.resolved — upstream dependency set changed; this pin step needs a re-check")
-              sys.exit(1)
-          pin["state"] = {
-              "revision": "be0d257b9bd47a4e6e1265fc8c237411825f107a",
-              "version": "8.12.0",
-          }
-          with open(path, "w") as f:
-              json.dump(resolved, f, indent=2)
-              f.write("\n")
-          print("Package.resolved: Kingfisher pinned to 8.12.0 (swift-tools-version 5.1 — parses fine with Swift 6.1 tools)")
-          PIN_KINGFISHER_EOF
-          # Belt and suspenders: fail here, not 20 minutes later inside
-          # xcodebuild, if the rewrite did not take.
-          python3 -c "import json,sys; r=json.load(open(sys.argv[1])); s=[p for p in r['pins'] if 'Kingfisher' in p['location']][0]['state']; assert s['version']=='8.12.0' and s['revision']=='be0d257b9bd47a4e6e1265fc8c237411825f107a', s" "$RESOLVED"
-
       - name: Select Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: "16.4"
+          # 27.0 (27A266a) is the exact compiler whose interface the vendored
+          # StikJIT.xcframework carries; 27.1/27.2 also ship on this image
+          # and also carry Swift 6.4 if you ever bump the pin.
+          xcode-version: "27.0"
 
       - name: Build unsigned archive (no Apple Developer account needed)
         run: |
           set -o pipefail
+          # Log to a file so failures can be tailed in full below: xcodebuild's
+          # own error output is far longer than what any pretty printer shows.
+          # GitHub runs this with bash -e, so the exit code is captured with
+          # `|| status=$?` — a bare failing command would abort before the
+          # tail code below could run.
+          status=0
           xcodebuild clean archive \
             -project "LiveContainer.xcodeproj" \
             -scheme "LiveContainer" \
@@ -282,7 +251,21 @@ jobs:
             -archivePath $PWD/build/FlekDeck.xcarchive \
             -destination "generic/platform=iOS" \
             CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
-            | xcpretty || true
+            > build.log 2>&1 || status=$?
+          # Pretty-print the log tail for the web UI (xcbeautify ships on the
+          # xcode-27 image; fall back through xcpretty to a plain cat).
+          if command -v xcbeautify >/dev/null 2>&1; then
+            tail -n 400 build.log | xcbeautify || tail -n 400 build.log
+          elif command -v xcpretty >/dev/null 2>&1; then
+            tail -n 400 build.log | xcpretty || tail -n 400 build.log
+          else
+            tail -n 400 build.log
+          fi
+          if [ "$status" -ne 0 ]; then
+            echo "=== xcodebuild failed (exit $status) — last 120 lines of build.log ==="
+            tail -n 120 build.log
+            exit 1
+          fi
           test -d build/FlekDeck.xcarchive/Products/Applications/FlekDeck.app \
             || { echo "archive missing FlekDeck.app — build failed"; exit 1; }
 

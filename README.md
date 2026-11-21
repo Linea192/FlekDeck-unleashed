@@ -3,7 +3,7 @@
 </div>
 
 <div align="center">
-  <h1>FlekDeck</h1>
+  <h1>FlekDeck unleashed</h1>
   <p><strong>Your apps. Your space. A whole new way to use iOS.</strong></p>
   <p>Developed by <a href="https://flekstore.com">FlekStore</a></p>
 </div>
